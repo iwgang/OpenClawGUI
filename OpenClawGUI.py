@@ -5,15 +5,15 @@ import sys
 import configparser
 import subprocess
 import threading
+import queue
 import re
 import webbrowser
 import getpass
 import platform
 from datetime import datetime
-from multiprocessing import Process, Queue
 
 # 平台判断
-OS_TYPE = platform.system()  # "Darwin" or "Windows"
+OS_TYPE = platform.system()
 IS_MAC = OS_TYPE == "Darwin"
 IS_WIN = OS_TYPE == "Windows"
 
@@ -27,14 +27,13 @@ else:
 
 
 class OpenClawGUI:
-    def __init__(self, root, cmd_queue, status_queue):
+    def __init__(self, root, tray_manager):
         self.root = root
-        self.cmd_queue = cmd_queue
-        self.status_queue = status_queue
+        self.tray = tray_manager
 
         # 标题显示系统版本
         os_name = "macOS" if IS_MAC else "Windows"
-        self.root.title(f"OpenClawGUI 控制台 v1.0 ({os_name})")
+        self.root.title(f"OpenClawGUI 控制台 v1.1 ({os_name})")
 
         # 环境路径补丁 (macOS)
         if IS_MAC:
@@ -60,7 +59,7 @@ class OpenClawGUI:
         # macOS: 点击 Dock 图标时恢复窗口
         if IS_MAC:
             self.root.createcommand('tk::mac::ReopenApplication', lambda: self.root.after(10, self.show_window))
-        self.check_queue()
+            self._setup_mac_dock_handler()
 
     def center_window(self):
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
@@ -219,7 +218,7 @@ class OpenClawGUI:
         if self.is_running: return
         self.is_running = True
         self.has_notified = False
-        self.status_queue.put("ON")
+        self.tray.set_status(True)
         self.start_btn.config(state="disabled")
         self.update_status(True)
         self.log(">>> 正在启动引擎...")
@@ -236,7 +235,7 @@ class OpenClawGUI:
                 if not self.is_running: break
                 clean_line = self.strip_ansi(line.strip())
                 if not clean_line: continue
-                self.log(clean_line)
+                self.root.after(0, lambda l=clean_line: self.log(l))
                 if "agent model:" in clean_line:
                     model_name = clean_line.split("agent model:")[-1].strip()
                     self.root.after(0, lambda m=model_name: self.model_label.config(text=m, fg=self.colors["success"]))
@@ -260,7 +259,7 @@ class OpenClawGUI:
                         self.root.after(0, lambda info=start_info: self._send_feishu_msg(info))
             self.process.wait()
         except Exception as e:
-            self.log(f"运行时错误: {e}")
+            self.root.after(0, lambda: self.log(f"运行时错误: {e}"))
         finally:
             self.root.after(0, self._ui_reset)
 
@@ -288,7 +287,7 @@ class OpenClawGUI:
     def _ui_reset(self):
         self.start_btn.config(state="normal")
         self.is_running = False
-        self.status_queue.put("OFF")
+        self.tray.set_status(False)
         self.update_status(False)
         self.model_label.config(text="已停止", fg=self.colors["text_dim"])
         self.url_label.config(text="暂无地址", fg=self.colors["text_dim"])
@@ -359,10 +358,10 @@ class OpenClawGUI:
         tk.Label(about_win, text="作者：iWgang", font=(UI_FONT, 12),
                  bg=self.colors["bg"], fg=self.colors["text_dim"]).pack()
 
-        link = tk.Label(about_win, text="Github: github.com/anthropics", fg="#60a5fa",
+        link = tk.Label(about_win, text="Github: github.com/iwgang", fg="#60a5fa",
                         font=(UI_FONT, 11), bg=self.colors["bg"])
         link.pack(pady=10)
-        link.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/anthropics"))
+        link.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/iwgang"))
         link.bind("<Enter>", lambda e: link.config(fg=self.colors["highlight"]))
         link.bind("<Leave>", lambda e: link.config(fg="#60a5fa"))
 
@@ -396,19 +395,30 @@ class OpenClawGUI:
             except (ImportError, AttributeError):
                 pass
 
-    def check_queue(self):
-        while not self.cmd_queue.empty():
-            msg = self.cmd_queue.get_nowait()
-            if msg == "SHOW": self.show_window()
-            elif msg == "QUIT": self.quit_app()
-            elif msg == "START": self.start_guard()
-            elif msg == "STOP": self.stop_guard()
-        self.root.after(200, self.check_queue)
+    def _setup_mac_dock_handler(self):
+        """设置 macOS Dock 点击处理"""
+        try:
+            from AppKit import NSApp, NSObject, NSApplicationActivationPolicyRegular
+            from Foundation import NSObject
+            import objc
+
+            gui_self = self
+
+            class AppDelegate(NSObject):
+                def applicationShouldHandleReopen_hasVisibleWindows_(self, app, hasVisibleWindows):
+                    gui_self.root.after(10, gui_self.show_window)
+                    return True
+
+            delegate = AppDelegate.alloc().init()
+            NSApp.setDelegate_(delegate)
+            # 保持引用防止被回收
+            self._app_delegate = delegate
+        except (ImportError, Exception):
+            pass
 
     def quit_app(self):
         if self.is_running:
             self.is_running = False
-            self.status_queue.put("OFF")
             subprocess.run("openclaw gateway stop", shell=True, capture_output=True)
             if IS_MAC:
                 subprocess.run("pkill -9 openclaw", shell=True, capture_output=True)
@@ -416,168 +426,118 @@ class OpenClawGUI:
             elif IS_WIN:
                 subprocess.run("taskkill /F /IM openclaw.exe", shell=True, capture_output=True)
             if self.process: self.process.terminate()
+        self.tray.stop()
         self.root.quit()
-        sys.exit(0)
 
 
-# --- 获取图标路径 ---
-def get_icon_paths():
-    if getattr(sys, 'frozen', False):
-        if hasattr(sys, '_MEIPASS'):
-            base_dir = sys._MEIPASS
-        else:
-            base_dir = os.path.dirname(sys.executable)
-    else:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-    icon_on = os.path.join(base_dir, "icons", "tray_icon_on.png")
-    icon_off = os.path.join(base_dir, "icons", "tray_icon_off.png")
-    return icon_on, icon_off
+# --- 托盘管理器 (pystray) ---
+class TrayManager:
+    def __init__(self, gui_callback):
+        import pystray
+        from PIL import Image
 
+        self.pystray = pystray
+        self.gui_callback = gui_callback
+        self.icon = None
+        self._running = False
 
-# --- macOS 托盘 (rumps) ---
-def run_tray_mac(cmd_queue, status_queue):
-    import rumps
-
-    try:
-        from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
-        app = NSApplication.sharedApplication()
-        app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
-    except:
-        pass
-
-    icon_on, icon_off = get_icon_paths()
-
-    class TrayApp(rumps.App):
-        def __init__(self):
-            if os.path.exists(icon_off):
-                super().__init__("OpenClawGUI", icon=icon_off)
-                self.use_icon_file = True
+        # 图标路径
+        if getattr(sys, 'frozen', False):
+            if hasattr(sys, '_MEIPASS'):
+                base_dir = sys._MEIPASS
             else:
-                super().__init__("OpenClawGUI", title="🦞⚪")
-                self.use_icon_file = False
+                base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
 
-            self.menu = [
-                rumps.MenuItem("显示控制面板", callback=self.show_panel),
-                None,
-                rumps.MenuItem("启动服务", callback=self.start_service),
-                rumps.MenuItem("停止服务", callback=self.stop_service),
-                None,
-                rumps.MenuItem("彻底退出", callback=self.quit_app)
-            ]
-            self.quit_button = None
-            self.timer = rumps.Timer(self.check_status, 0.5)
-            self.timer.start()
+        self.icon_on_path = os.path.join(base_dir, "icons", "tray_icon_on.png")
+        self.icon_off_path = os.path.join(base_dir, "icons", "tray_icon_off.png")
 
-        def show_panel(self, _):
-            cmd_queue.put("SHOW")
+        self.icon_on = self._load_icon(self.icon_on_path)
+        self.icon_off = self._load_icon(self.icon_off_path)
 
-        def start_service(self, _):
-            cmd_queue.put("START")
-
-        def stop_service(self, _):
-            cmd_queue.put("STOP")
-
-        def quit_app(self, _):
-            cmd_queue.put("QUIT")
-            rumps.quit_application()
-
-        def check_status(self, _):
-            while not status_queue.empty():
-                msg = status_queue.get_nowait()
-                if msg == "ON":
-                    if self.use_icon_file and os.path.exists(icon_on):
-                        self.title = None
-                        self.icon = icon_on
-                    else:
-                        self.title = "🦞🟢"
-                elif msg == "OFF":
-                    if self.use_icon_file and os.path.exists(icon_off):
-                        self.title = None
-                        self.icon = icon_off
-                    else:
-                        self.title = "🦞⚪"
-
-    TrayApp().run()
-
-
-# --- Windows 托盘 (pystray) ---
-def run_tray_win(cmd_queue, status_queue):
-    import pystray
-    from PIL import Image
-
-    icon_on, icon_off = get_icon_paths()
-
-    # 加载图标
-    def load_icon(path):
+    def _load_icon(self, path):
+        from PIL import Image
         if os.path.exists(path):
             return Image.open(path)
         # 创建默认图标
         img = Image.new('RGB', (64, 64), color='gray')
         return img
 
-    current_icon = [load_icon(icon_off)]
-    tray_icon = [None]
+    def start(self):
+        menu = self.pystray.Menu(
+            self.pystray.MenuItem("显示控制面板", self._show_panel),
+            self.pystray.Menu.SEPARATOR,
+            self.pystray.MenuItem("启动服务", self._start_service),
+            self.pystray.MenuItem("停止服务", self._stop_service),
+            self.pystray.Menu.SEPARATOR,
+            self.pystray.MenuItem("彻底退出", self._quit_app)
+        )
 
-    def show_panel():
-        cmd_queue.put("SHOW")
+        self.icon = self.pystray.Icon("OpenClawGUI", self.icon_off, "OpenClawGUI", menu)
+        self._running = True
+        threading.Thread(target=self._run_icon, daemon=True).start()
 
-    def start_service():
-        cmd_queue.put("START")
+    def _run_icon(self):
+        self.icon.run()
 
-    def stop_service():
-        cmd_queue.put("STOP")
+    def stop(self):
+        self._running = False
+        if self.icon:
+            self.icon.stop()
 
-    def quit_app():
-        cmd_queue.put("QUIT")
-        if tray_icon[0]:
-            tray_icon[0].stop()
+    def set_status(self, running):
+        if self.icon:
+            if running:
+                self.icon.icon = self.icon_on
+            else:
+                self.icon.icon = self.icon_off
 
-    menu = pystray.Menu(
-        pystray.MenuItem("显示控制面板", lambda: show_panel()),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("启动服务", lambda: start_service()),
-        pystray.MenuItem("停止服务", lambda: stop_service()),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("彻底退出", lambda: quit_app())
-    )
+    def _show_panel(self):
+        self.gui_callback("SHOW")
 
-    icon = pystray.Icon("OpenClawGUI", current_icon[0], "OpenClawGUI", menu)
-    tray_icon[0] = icon
+    def _start_service(self):
+        self.gui_callback("START")
 
-    # 状态检查线程
-    def check_status():
-        while True:
-            try:
-                if not status_queue.empty():
-                    msg = status_queue.get_nowait()
-                    if msg == "ON":
-                        icon.icon = load_icon(icon_on)
-                    elif msg == "OFF":
-                        icon.icon = load_icon(icon_off)
-            except:
-                pass
-            threading.Event().wait(0.5)
+    def _stop_service(self):
+        self.gui_callback("STOP")
 
-    threading.Thread(target=check_status, daemon=True).start()
-    icon.run()
+    def _quit_app(self):
+        self.gui_callback("QUIT")
 
 
 if __name__ == "__main__":
-    import multiprocessing
-
-    if IS_MAC:
-        multiprocessing.set_start_method('spawn')
-
-    multiprocessing.freeze_support()
-    cmd_q = Queue()
-    status_q = Queue()
-
-    # 根据平台启动托盘
-    if IS_MAC:
-        Process(target=run_tray_mac, args=(cmd_q, status_q), daemon=True).start()
-    elif IS_WIN:
-        Process(target=run_tray_win, args=(cmd_q, status_q), daemon=True).start()
-
     root = tk.Tk()
-    OpenClawGUI(root, cmd_q, status_q)
+    gui = None
+    cmd_queue = queue.Queue()
+
+    def handle_tray_command(cmd):
+        # 将命令放入队列，由主线程处理
+        cmd_queue.put(cmd)
+
+    def process_queue():
+        # 主线程轮询队列处理命令
+        try:
+            while True:
+                cmd = cmd_queue.get_nowait()
+                if gui is None:
+                    continue
+                if cmd == "SHOW":
+                    gui.show_window()
+                elif cmd == "START":
+                    gui.start_guard()
+                elif cmd == "STOP":
+                    gui.stop_guard()
+                elif cmd == "QUIT":
+                    gui.quit_app()
+                    return  # 退出后不再继续轮询
+        except queue.Empty:
+            pass
+        root.after(100, process_queue)  # 每 100ms 检查一次队列
+
+    tray = TrayManager(handle_tray_command)
+    tray.start()
+
+    gui = OpenClawGUI(root, tray)
+    root.after(100, process_queue)  # 启动队列轮询
     root.mainloop()

@@ -12,19 +12,13 @@ OpenClaw 跨平台控制台 GUI，支持 macOS 和 Windows。
 
 ## 依赖安装
 
-**macOS:**
-```bash
-pip install rumps pyobjc-framework-Cocoa
-```
-
-**Windows:**
 ```bash
 pip install pystray pillow
 ```
 
-**通用依赖:**
+**macOS 额外安装（用于 Dock 图标点击恢复窗口）:**
 ```bash
-pip install pyinstaller
+pip install pyobjc-framework-Cocoa
 ```
 
 ## 运行
@@ -35,45 +29,22 @@ python OpenClawGUI.py
 
 ## 打包
 
-### macOS
-
+**macOS:**
 ```bash
 pyinstaller --windowed --onedir \
   --name "OpenClawGUI" \
+  --icon "icons/icon.icns" \
   --add-data "icons:icons" \
   OpenClawGUI.py
 ```
 
-打包完成后应用位于 `dist/OpenClawGUI.app`
-
-如有应用图标（.icns 格式），添加参数：
-```bash
---icon "icons/app_icon.icns"
-```
-
-### Windows
-
+**Windows:**
 ```bash
 pyinstaller --windowed --onedir ^
   --name "OpenClawGUI" ^
+  --icon "icons/icon.ico" ^
   --add-data "icons;icons" ^
   OpenClawGUI.py
 ```
 
-打包完成后应用位于 `dist/OpenClawGUI/`
-
-如有应用图标（.ico 格式），添加参数：
-```bash
---icon "icons/app_icon.ico"
-```
-
-## 托盘图标
-
-将以下图标放置于 `icons/` 目录：
-
-- `tray_icon_on.png` - 服务运行中图标
-- `tray_icon_off.png` - 服务停止图标
-
-## 配置文件
-
-`config.ini` 保存飞书用户 ID 配置，自动生成于程序目录。
+打包完成后应用位于 `dist/` 目录。
