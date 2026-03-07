@@ -33,7 +33,7 @@ class OpenClawGUI:
 
         # 标题显示系统版本
         os_name = "macOS" if IS_MAC else "Windows"
-        self.root.title(f"OpenClawGUI 控制台 v1.1 ({os_name})")
+        self.root.title(f"OpenClaw GUI 控制台 v1.2 ({os_name})")
 
         # 环境路径补丁 (macOS)
         if IS_MAC:
@@ -101,10 +101,8 @@ class OpenClawGUI:
         # 顶部标题栏
         header = tk.Frame(self.root, bg=c["bg"], pady=15)
         header.pack(fill="x", padx=20)
-        tk.Label(header, text="OpenClawGUI 控制台", font=(UI_FONT, 18, "bold"),
-                 bg=c["bg"], fg=c["text"]).pack(side="left")
-        self.status_label = tk.Label(header, text="● 已停止", font=(UI_FONT, 12),
-                                      bg=c["bg"], fg=c["text_dim"])
+        tk.Label(header, text="OpenClaw GUI 控制台", font=(UI_FONT, 18, "bold"), bg=c["bg"], fg=c["text"]).pack(side="left")
+        self.status_label = tk.Label(header, text="● 已停止", font=(UI_FONT, 12), bg=c["bg"], fg=c["text_dim"])
         self.status_label.pack(side="right")
 
         # 配置卡片
@@ -113,8 +111,7 @@ class OpenClawGUI:
 
         config_row = tk.Frame(config_card, bg=c["card"])
         config_row.pack(fill="x")
-        tk.Label(config_row, text="飞书用户 ID", font=(UI_FONT, 12),
-                 bg=c["card"], fg=c["text_dim"]).pack(side="left")
+        tk.Label(config_row, text="飞书用户 ID", font=(UI_FONT, 12), bg=c["card"], fg=c["text_dim"]).pack(side="left")
 
         self.id_entry = tk.Entry(config_row, bg=c["accent"], fg="white",
                                   insertbackground="white", font=(UI_FONT, 12),
@@ -131,10 +128,8 @@ class OpenClawGUI:
 
         info_row1 = tk.Frame(info_card, bg=c["card"])
         info_row1.pack(fill="x", pady=(0, 6))
-        tk.Label(info_row1, text="当前模型", font=(UI_FONT, 11),
-                 bg=c["card"], fg=c["text_dim"]).pack(side="left")
-        self.model_label = tk.Label(info_row1, text="等待启动...", font=(CODE_FONT, 11, "bold"),
-                                     bg=c["card"], fg=c["text_dim"])
+        tk.Label(info_row1, text="当前模型", font=(UI_FONT, 11), bg=c["card"], fg=c["text_dim"]).pack(side="left")
+        self.model_label = tk.Label(info_row1, text="等待启动...", font=(CODE_FONT, 11, "bold"), bg=c["card"], fg=c["text_dim"])
         self.model_label.pack(side="left", padx=15)
 
         info_row2 = tk.Frame(info_card, bg=c["card"])
@@ -159,10 +154,8 @@ class OpenClawGUI:
         # 日志区标题
         log_header = tk.Frame(self.root, bg=c["bg"], pady=8)
         log_header.pack(fill="x", padx=20)
-        tk.Label(log_header, text="运行日志", font=(UI_FONT, 12),
-                 bg=c["bg"], fg=c["text_dim"]).pack(side="left")
-        clear_link = tk.Label(log_header, text="清空", font=(UI_FONT, 11),
-                              bg=c["bg"], fg=c["text_dim"])
+        tk.Label(log_header, text="运行日志", font=(UI_FONT, 12),bg=c["bg"], fg=c["text_dim"]).pack(side="left")
+        clear_link = tk.Label(log_header, text="清空", font=(UI_FONT, 11), bg=c["bg"], fg=c["text_dim"])
         clear_link.pack(side="right")
         clear_link.bind("<Button-1>", lambda e: self.clear_log())
         clear_link.bind("<Enter>", lambda e: clear_link.config(fg=c["highlight"]))
@@ -261,7 +254,19 @@ class OpenClawGUI:
         except Exception as e:
             self.root.after(0, lambda: self.log(f"运行时错误: {e}"))
         finally:
-            self.root.after(0, self._ui_reset)
+            if self.is_running:  # 异常退出，自动重启
+                restart_msg = (
+                    f"⚠️ [OpenClaw 异常重启]\n"
+                    f"操作用户：{getpass.getuser()}\n"
+                    f"电脑名称：{platform.node()}\n"
+                    f"检测时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"系统正在自动恢复..."
+                )
+                self.root.after(0, lambda: self.log("⚠️ 检测到异常退出，正在自动重启...", "warning"))
+                self.root.after(0, lambda msg=restart_msg: self._send_feishu_msg(msg))
+                self.root.after(2000, self.start_guard)  # 2秒后重启
+            else:  # 正常停止
+                self.root.after(0, self._ui_reset)
 
     def open_browser(self):
         url = self.url_label.cget("text")
@@ -327,10 +332,8 @@ class OpenClawGUI:
         y = self.root.winfo_y() + 200
         test_win.geometry(f"+{x}+{y}")
 
-        tk.Label(test_win, text="输入测试内容:", font=(UI_FONT, 12),
-                 bg=self.colors["bg"], fg=self.colors["text"]).pack(pady=15)
-        entry = tk.Entry(test_win, font=(UI_FONT, 12), width=35,
-                         bg=self.colors["accent"], fg="white", insertbackground="white")
+        tk.Label(test_win, text="输入测试内容:", font=(UI_FONT, 12), bg=self.colors["bg"], fg=self.colors["text"]).pack(pady=15)
+        entry = tk.Entry(test_win, font=(UI_FONT, 12), width=35, bg=self.colors["accent"], fg="white", insertbackground="white")
         entry.insert(0, "这是一条来自控制台的测试消息")
         entry.pack(padx=20, pady=5, ipady=5)
         entry.focus_set()

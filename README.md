@@ -8,7 +8,9 @@ OpenClaw 跨平台控制台 GUI，支持 macOS 和 Windows。
 - 系统托盘图标（状态指示）
 - 实时日志显示（彩色高亮）
 - 飞书消息通知
-- 深色主题 UI
+- 异常自动重启（进程崩溃后自动恢复，并发送飞书通知）
+
+![OpenClawGUI截图](https://raw.githubusercontent.com/iwgang/OpenClawGUI/refs/heads/main/screenshot/s1.png)
 
 ## 依赖安装
 
