@@ -42,11 +42,7 @@ pyinstaller --windowed --onedir \
 
 **Windows:**
 ```bash
-pyinstaller --windowed --onedir ^
-  --name "OpenClawGUI" ^
-  --icon "icons/icon.ico" ^
-  --add-data "icons;icons" ^
-  OpenClawGUI.py
+pyinstaller --windowed --onedir --name "OpenClawGUI" --icon "icons/icon.ico" --add-data "icons;icons" OpenClawGUI.py
 ```
 
 打包完成后应用位于 `dist/` 目录。

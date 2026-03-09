@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icons/icon.icns'],
+    icon=['icons\\icon.ico'],
 )
 coll = COLLECT(
     exe,
@@ -42,10 +42,4 @@ coll = COLLECT(
     upx=True,
     upx_exclude=[],
     name='OpenClawGUI',
-)
-app = BUNDLE(
-    coll,
-    name='OpenClawGUI.app',
-    icon='icons/icon.icns',
-    bundle_identifier=None,
 )

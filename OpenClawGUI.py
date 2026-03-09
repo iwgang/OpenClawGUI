@@ -91,6 +91,23 @@ class OpenClawGUI:
         os_name = "macOS" if IS_MAC else "Windows"
         self.root.title(f"OpenClaw GUI 控制台 v1.3 ({os_name})")
 
+        # 设置窗口图标
+        if getattr(sys, 'frozen', False):
+            icon_base = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
+        else:
+            icon_base = os.path.dirname(os.path.abspath(__file__))
+
+        if IS_WIN:
+            icon_path = os.path.join(icon_base, "icons", "icon.ico")
+            if os.path.exists(icon_path):
+                self.root.iconbitmap(icon_path)
+        else:
+            icon_path = os.path.join(icon_base, "icons", "icon.png")
+            if os.path.exists(icon_path):
+                icon_img = tk.PhotoImage(file=icon_path)
+                self.root.iconphoto(True, icon_img)
+                self._window_icon = icon_img  # 保持引用防止被垃圾回收
+
         # 环境路径补丁 (macOS)
         if IS_MAC:
             os.environ["PATH"] = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + os.environ.get("PATH", "")
@@ -148,15 +165,17 @@ class OpenClawGUI:
         style.theme_use("clam")
         style.configure("Card.TFrame", background=c["card"])
         style.configure("Main.TFrame", background=c["bg"])
-        style.configure("TButton", padding=(12, 6), font=(UI_FONT, 12))
+        # Windows 按钮需要更大的 padding 才能完整显示文字
+        btn_padding = (20, 8) if IS_WIN else (12, 6)
+        style.configure("TButton", padding=btn_padding, font=(UI_FONT, 12))
         style.map("TButton",
             background=[("active", c["accent"]), ("!active", c["card"])],
             foreground=[("active", "white"), ("!active", c["text"])])
-        style.configure("Start.TButton", font=(UI_FONT, 12, "bold"))
+        style.configure("Start.TButton", padding=btn_padding, font=(UI_FONT, 12, "bold"))
         style.map("Start.TButton",
             background=[("active", "#22c55e"), ("!active", c["success"])],
             foreground=[("active", "white"), ("!active", "#0d1117")])
-        style.configure("Stop.TButton", font=(UI_FONT, 12))
+        style.configure("Stop.TButton", padding=btn_padding, font=(UI_FONT, 12))
         style.map("Stop.TButton",
             background=[("active", "#dc2626"), ("!active", c["highlight"])],
             foreground=[("active", "white"), ("!active", "white")])
@@ -310,7 +329,8 @@ class OpenClawGUI:
     def guard_loop(self):
         try:
             self.process = subprocess.Popen("openclaw gateway --force --allow-unconfigured",
-                                         shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                         shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                         text=True, encoding='utf-8', errors='replace')
             for line in iter(self.process.stdout.readline, ''):
                 if not self.is_running: break
                 clean_line = self.strip_ansi(line.strip())
@@ -338,8 +358,9 @@ class OpenClawGUI:
                         )
                         self.root.after(0, lambda info=start_info: self._send_feishu_msg(info))
             self.process.wait()
-        except Exception as e:
-            self.root.after(0, lambda: self.log(f"运行时错误: {e}"))
+        except Exception as ex:
+            err_msg = str(ex)
+            self.root.after(0, lambda msg=err_msg: self.log(f"运行时错误: {msg}"))
         finally:
             if self.is_running:  # 异常退出，自动重启
                 restart_msg = (
@@ -485,12 +506,12 @@ class OpenClawGUI:
         """打开状态通知配置窗口"""
         config_win = tk.Toplevel(self.root)
         config_win.title("状态通知配置")
-        config_win.geometry("450x360")
-        config_win.resizable(False, False)
-        config_win.configure(bg=self.colors["bg"])
+        win_height = 450 if IS_WIN else 360
         x = self.root.winfo_x() + 175
         y = self.root.winfo_y() + 150
-        config_win.geometry(f"+{x}+{y}")
+        config_win.geometry(f"450x{win_height}+{x}+{y}")
+        config_win.resizable(False, False)
+        config_win.configure(bg=self.colors["bg"])
 
         c = self.colors
 
@@ -562,7 +583,8 @@ class OpenClawGUI:
         config_win = tk.Toplevel(self.root)
         config_win.title("消息频道配置")
         # 根据频道数量调整高度
-        win_height = 180 + len(channels) * 35
+        base_height = 220 if IS_WIN else 180
+        win_height = base_height + len(channels) * 35
         config_win.geometry(f"350x{win_height}")
         config_win.resizable(False, False)
         config_win.configure(bg=self.colors["bg"])
@@ -624,7 +646,8 @@ class OpenClawGUI:
     def open_test_msg_window(self):
         test_win = tk.Toplevel(self.root)
         test_win.title("发送测试消息")
-        test_win.geometry("400x220")
+        win_height = 260 if IS_WIN else 220
+        test_win.geometry(f"400x{win_height}")
         test_win.resizable(False, False)
         test_win.configure(bg=self.colors["bg"])
         x = self.root.winfo_x() + 200
@@ -669,7 +692,8 @@ class OpenClawGUI:
     def show_about(self):
         about_win = tk.Toplevel(self.root)
         about_win.title("关于 OpenClawGUI")
-        about_win.geometry("350x180")
+        win_height = 220 if IS_WIN else 180
+        about_win.geometry(f"350x{win_height}")
         about_win.resizable(False, False)
         about_win.configure(bg=self.colors["bg"])
         x = self.root.winfo_x() + 225
@@ -805,7 +829,7 @@ class TrayManager:
 
     def start(self):
         menu = self.pystray.Menu(
-            self.pystray.MenuItem("显示控制面板", self._show_panel),
+            self.pystray.MenuItem("显示控制面板", self._show_panel, default=True),
             self.pystray.Menu.SEPARATOR,
             self.pystray.MenuItem("启动服务", self._start_service),
             self.pystray.MenuItem("停止服务", self._stop_service),
