@@ -517,7 +517,9 @@ class OpenClawGUI:
     def _get_current_model(self):
         """获取当前默认模型"""
         try:
-            result = subprocess.run("openclaw models list", shell=True, capture_output=True, text=True, timeout=10)
+            import os
+            env = os.environ.copy()
+            result = subprocess.run("/usr/local/bin/openclaw models list", shell=True, capture_output=True, text=True, timeout=30, env=env)
             if result.returncode == 0:
                 for line in result.stdout.split('\n'):
                     if 'default' in line and 'Tags' not in line:
@@ -532,7 +534,9 @@ class OpenClawGUI:
         """获取可用的模型列表（Auth=yes）"""
         models = []
         try:
-            result = subprocess.run("openclaw models list", shell=True, capture_output=True, text=True, timeout=15)
+            import os
+            env = os.environ.copy()
+            result = subprocess.run("/usr/local/bin/openclaw models list", shell=True, capture_output=True, text=True, timeout=30, env=env)
             if result.returncode == 0:
                 lines = result.stdout.split('\n')
                 # 找到表头行的位置
@@ -731,7 +735,12 @@ class OpenClawGUI:
         try:
             result = subprocess.run("openclaw --version", shell=True, capture_output=True, text=True, timeout=5)
             if result.returncode == 0 and result.stdout.strip():
-                # 输出格式: OpenClaw 2026.3.11 (29dc654)
+                # 输出格式: 🦞 OpenClaw 2026.3.11 (29dc654) — ...
+                import re
+                match = re.search(r'OpenClaw\s+(\d+\.\d+\.\d+)\s*\(([^)]+)\)', result.stdout)
+                if match:
+                    return f"{match.group(1)} ({match.group(2)})"
+                # 兼容旧格式
                 return result.stdout.strip().replace("OpenClaw ", "")
         except:
             pass

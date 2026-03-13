@@ -33,16 +33,12 @@ python OpenClawGUI.py
 
 **macOS:**
 ```bash
-pyinstaller --windowed --onedir \
-  --name "OpenClawGUI" \
-  --icon "icons/icon.icns" \
-  --add-data "icons:icons" \
-  OpenClawGUI.py
+pyinstaller OpenClawGUI_mac.spec
 ```
 
 **Windows:**
 ```bash
-pyinstaller --windowed --onedir --name "OpenClawGUI" --icon "icons/icon.ico" --add-data "icons;icons" OpenClawGUI.py
+pyinstaller OpenClawGUI.spec
 ```
 
 打包完成后应用位于 `dist/` 目录。
