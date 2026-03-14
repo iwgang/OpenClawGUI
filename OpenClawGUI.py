@@ -101,7 +101,7 @@ class OpenClawGUI:
 
         # 标题显示系统版本
         os_name = "macOS" if IS_MAC else "Windows"
-        self.root.title(f"OpenClaw GUI 控制台 v1.5.1 ({os_name})")
+        self.root.title(f"OpenClaw GUI 控制台 v1.5.2 ({os_name})")
 
         # 设置窗口图标
         if getattr(sys, 'frozen', False):
@@ -403,7 +403,7 @@ class OpenClawGUI:
             self.restart_count = 0  # 用户点击启动按钮时重置计数
         self.is_running = True
         self.has_notified = False
-        self.tray.set_status(True)
+        if self.tray: self.tray.set_status(True)
         self.start_btn.config(state="disabled")
         self.update_status(True)
         self.log(">>> 正在启动引擎...")
@@ -798,7 +798,7 @@ class OpenClawGUI:
     def _ui_reset(self):
         self.start_btn.config(state="normal")
         self.is_running = False
-        self.tray.set_status(False)
+        if self.tray: self.tray.set_status(False)
         self.update_status(False)
         self.url_label.config(text="暂无地址", fg=self.colors["text_dim"])
 
@@ -1184,12 +1184,106 @@ class OpenClawGUI:
             elif IS_WIN:
                 subprocess.run("taskkill /F /IM openclaw.exe", shell=True, capture_output=True)
             if self.process: self.process.terminate()
-        self.tray.stop()
+        if self.tray: self.tray.stop()
         self.root.quit()
 
 
-# --- 托盘管理器 (pystray) ---
-class TrayManager:
+# --- 托盘管理器 ---
+def _get_icon_paths():
+    """获取图标路径"""
+    if getattr(sys, 'frozen', False):
+        if hasattr(sys, '_MEIPASS'):
+            base_dir = sys._MEIPASS
+        else:
+            base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    return (
+        os.path.join(base_dir, "icons", "tray_icon_on.png"),
+        os.path.join(base_dir, "icons", "tray_icon_off.png")
+    )
+
+
+# Mac 托盘 (PyObjC 原生实现)
+class MacTrayManager:
+    def __init__(self, gui_callback):
+        self.gui_callback = gui_callback
+        self.status_item = None
+        self._running = False
+        self.icon_on_path, self.icon_off_path = _get_icon_paths()
+
+    def start(self):
+        from AppKit import NSStatusBar, NSMenu, NSMenuItem, NSImage, NSVariableStatusItemLength
+        from PyObjCTools import AppHelper
+
+        self._running = True
+
+        # 创建状态栏图标
+        self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
+        self.status_item.setHighlightMode_(True)
+
+        # 设置图标
+        if os.path.exists(self.icon_off_path):
+            icon = NSImage.alloc().initWithContentsOfFile_(self.icon_off_path)
+            icon.setSize_((18, 18))
+            self.status_item.button().setImage_(icon)
+
+        # 创建菜单
+        menu = NSMenu.alloc().init()
+
+        show_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("显示控制面板", "showPanel:", "")
+        show_item.setTarget_(self)
+        menu.addItem_(show_item)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        start_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("启动服务", "startService:", "")
+        start_item.setTarget_(self)
+        menu.addItem_(start_item)
+
+        stop_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("停止服务", "stopService:", "")
+        stop_item.setTarget_(self)
+        menu.addItem_(stop_item)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("彻底退出", "quitApp:", "")
+        quit_item.setTarget_(self)
+        menu.addItem_(quit_item)
+
+        self.status_item.setMenu_(menu)
+
+    def stop(self):
+        self._running = False
+        if self.status_item:
+            from AppKit import NSStatusBar
+            NSStatusBar.systemStatusBar().removeStatusItem_(self.status_item)
+            self.status_item = None
+
+    def set_status(self, running):
+        if self.status_item:
+            from AppKit import NSImage
+            icon_path = self.icon_on_path if running else self.icon_off_path
+            if os.path.exists(icon_path):
+                icon = NSImage.alloc().initWithContentsOfFile_(icon_path)
+                icon.setSize_((18, 18))
+                self.status_item.button().setImage_(icon)
+
+    def showPanel_(self, sender):
+        self.gui_callback("SHOW")
+
+    def startService_(self, sender):
+        self.gui_callback("START")
+
+    def stopService_(self, sender):
+        self.gui_callback("STOP")
+
+    def quitApp_(self, sender):
+        self.gui_callback("QUIT")
+
+
+# Windows 托盘 (pystray)
+class WinTrayManager:
     def __init__(self, gui_callback):
         import pystray
         from PIL import Image
@@ -1199,18 +1293,7 @@ class TrayManager:
         self.icon = None
         self._running = False
 
-        # 图标路径
-        if getattr(sys, 'frozen', False):
-            if hasattr(sys, '_MEIPASS'):
-                base_dir = sys._MEIPASS
-            else:
-                base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-
-        self.icon_on_path = os.path.join(base_dir, "icons", "tray_icon_on.png")
-        self.icon_off_path = os.path.join(base_dir, "icons", "tray_icon_off.png")
-
+        self.icon_on_path, self.icon_off_path = _get_icon_paths()
         self.icon_on = self._load_icon(self.icon_on_path)
         self.icon_off = self._load_icon(self.icon_off_path)
 
@@ -1218,9 +1301,7 @@ class TrayManager:
         from PIL import Image
         if os.path.exists(path):
             return Image.open(path)
-        # 创建默认图标
-        img = Image.new('RGB', (64, 64), color='gray')
-        return img
+        return Image.new('RGB', (64, 64), color='gray')
 
     def start(self):
         menu = self.pystray.Menu(
@@ -1231,13 +1312,9 @@ class TrayManager:
             self.pystray.Menu.SEPARATOR,
             self.pystray.MenuItem("彻底退出", self._quit_app)
         )
-
         self.icon = self.pystray.Icon("OpenClawGUI", self.icon_off, "OpenClawGUI", menu)
         self._running = True
-        threading.Thread(target=self._run_icon, daemon=True).start()
-
-    def _run_icon(self):
-        self.icon.run()
+        threading.Thread(target=self.icon.run, daemon=True).start()
 
     def stop(self):
         self._running = False
@@ -1246,10 +1323,7 @@ class TrayManager:
 
     def set_status(self, running):
         if self.icon:
-            if running:
-                self.icon.icon = self.icon_on
-            else:
-                self.icon.icon = self.icon_off
+            self.icon.icon = self.icon_on if running else self.icon_off
 
     def _show_panel(self):
         self.gui_callback("SHOW")
@@ -1262,6 +1336,14 @@ class TrayManager:
 
     def _quit_app(self):
         self.gui_callback("QUIT")
+
+
+def TrayManager(gui_callback):
+    """工厂函数：Mac 用 rumps，Windows 用 pystray"""
+    if IS_MAC:
+        return MacTrayManager(gui_callback)
+    else:
+        return WinTrayManager(gui_callback)
 
 
 if __name__ == "__main__":
